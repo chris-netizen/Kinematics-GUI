@@ -7,7 +7,6 @@ from itertools import combinations
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-import mplstereonet
 from sklearn.cluster import KMeans
 from scipy.stats import gaussian_kde
 import matplotlib.cm as cm  # For cluster colors
@@ -23,10 +22,13 @@ class KinematicAnalyzer:
     """
     Enhanced class for kinematic slope stability analysis.
     Now includes clustering, toppling, friction cone, contours.
+    Supports flexible column selection.
     """
 
     def __init__(self, data=None, file_path=None, n_clusters=3):
         self.df = None
+        self.dip_dir_col = 'Dip_Direction'
+        self.dip_col = 'Dip_Angle'
         self.results = None
         self.clusters = None  # Dict: cluster_id -> df_subset
         self.cluster_means = None  # Dict: cluster_id -> mean_dip_dir, mean_dip
@@ -42,22 +44,37 @@ class KinematicAnalyzer:
             self._validate_data()
 
     def load_data(self, file_path):
-        """Load CSV and validate."""
+        """Load CSV or Excel files without strict validation."""
         try:
-            self.df = pd.read_csv(file_path)
-            self._validate_data()
+            if file_path.endswith('.xlsx') or file_path.endswith('.xls'):
+                self.df = pd.read_excel(file_path)
+            else:
+                self.df = pd.read_csv(file_path)
+            # No strict validation here; defer to user selection
         except Exception as e:
             raise ValueError(f"Error loading {file_path}: {e}")
 
-    def _validate_data(self):
-        """Check columns and angle bounds."""
-        required_cols = ['Dip_Direction', 'Dip_Angle']
-        if not all(col in self.df.columns for col in required_cols):
-            raise ValueError(f"CSV must have columns: {required_cols}")
-        if not (self.df['Dip_Direction'].between(0, 360).all() and
-                self.df['Dip_Angle'].between(0, 90).all()):
+    def set_dip_columns(self, dip_dir_col, dip_col):
+        """Set the column names for dip direction and dip angle."""
+        if dip_dir_col not in self.df.columns or dip_col not in self.df.columns:
+            raise ValueError("Selected columns do not exist.")
+        if dip_dir_col == dip_col:
             raise ValueError(
-                "Angles must be: Dip_Direction 0-360°, Dip_Angle 0-90°")
+                "Dip direction and dip columns must be different.")
+        self.dip_dir_col = dip_dir_col
+        self.dip_col = dip_col
+        self._validate_data()
+
+    def _validate_data(self):
+        """Check selected columns and angle bounds."""
+        if self.df is None or self.dip_dir_col not in self.df.columns or self.dip_col not in self.df.columns:
+            raise ValueError(
+                f"DataFrame missing required columns: {self.dip_dir_col}, {self.dip_col}")
+        dip_dir_data = self.df[self.dip_dir_col]
+        dip_data = self.df[self.dip_col]
+        if not (dip_dir_data.between(0, 360).all() and dip_data.between(0, 90).all()):
+            raise ValueError(
+                f"Angles must be: {self.dip_dir_col} 0-360°, {self.dip_col} 0-90°")
 
     def set_parameters(self, slope_dip_dir, slope_dip, friction, n_clusters=3):
         """Set params and validate."""
@@ -142,13 +159,13 @@ class KinematicAnalyzer:
         return False, 0.0
 
     def perform_clustering(self):
-        """K-means on pole coordinates."""
+        """K-means on pole coordinates using selected columns."""
         if self.df is None:
             return
         poles = []
         for _, row in self.df.iterrows():
-            pole_az = (row['Dip_Direction'] + 180) % 360
-            pole_pl = 90 - row['Dip_Angle']
+            pole_az = (row[self.dip_dir_col] + 180) % 360
+            pole_pl = 90 - row[self.dip_col]
             poles.append([math.radians(pole_az), math.radians(pole_pl)])
         poles = np.array(poles)
 
@@ -167,17 +184,17 @@ class KinematicAnalyzer:
             if mask.sum() > 0:
                 subset = self.df[mask].copy()
                 subset['Cluster'] = cid
-                mean_dir = subset['Dip_Direction'].mean()
-                mean_dip = subset['Dip_Angle'].mean()
+                mean_dir = subset[self.dip_dir_col].mean()
+                mean_dip = subset[self.dip_col].mean()
                 self.clusters[cid] = subset
                 self.cluster_means[cid] = (mean_dir, mean_dip)
 
     def analyze(self):
-        """Main analysis: Cluster first, then analyze each/all."""
+        """Main analysis: Cluster first, then analyze each/all using selected columns."""
         if self.df is None:
             raise ValueError("Load data first.")
         self.perform_clustering()
-        df_processed = self.df.copy()
+        df_processed = self.df[[self.dip_dir_col, self.dip_col]].copy()
         df_processed.columns = ['dip_dir', 'dip']
 
         total_planes = len(df_processed)
@@ -207,8 +224,8 @@ class KinematicAnalyzer:
 
         cluster_results = {}
         for cid, subset in self.clusters.items():
-            sub_df = subset.rename(
-                columns={'Dip_Direction': 'dip_dir', 'Dip_Angle': 'dip'})
+            sub_df = subset[[self.dip_dir_col, self.dip_col]].copy()
+            sub_df.columns = ['dip_dir', 'dip']
             sub_planar = [(local_idx, self.check_planar_failure(row)[
                            1]) for local_idx, row in sub_df.iterrows() if self.check_planar_failure(row)[0]]
             cluster_results[cid] = {'planar': len(
@@ -252,16 +269,16 @@ class KinematicAnalyzer:
             return "Run clustering first."
         stats = []
         for cid, subset in self.clusters.items():
-            mean_dir = subset['Dip_Direction'].mean()
-            std_dir = subset['Dip_Direction'].std()
-            mean_dip = subset['Dip_Angle'].mean()
-            std_dip = subset['Dip_Angle'].std()
+            mean_dir = subset[self.dip_dir_col].mean()
+            std_dir = subset[self.dip_dir_col].std()
+            mean_dip = subset[self.dip_col].mean()
+            std_dip = subset[self.dip_col].std()
             stats.append(
                 f"Cluster {cid}: n={len(subset)}, Mean Dir/Dip: {mean_dir:.1f}±{std_dir:.1f}/{mean_dip:.1f}±{std_dip:.1f}")
         return "\n".join(stats)
 
     def save_results(self, file_path):
-        """Save enhanced CSV with clusters, types, FS."""
+        """Save enhanced CSV with clusters, types, FS, and all original columns."""
         if not self.results:
             raise ValueError("Run analysis first.")
         r = self.results['overall']
@@ -282,6 +299,9 @@ class KinematicAnalyzer:
         if 'Cluster' in self.df.columns:
             combined = pd.merge(combined, self.df[[
                                 'Cluster']], left_on='Plane_Index', right_index=True, how='left')
+        # Merge with original df for all columns
+        combined = pd.merge(
+            combined, self.df, left_on='Plane_Index', right_index=True, how='left')
         combined.to_csv(file_path, index=False)
 
     def plot_stereonet(self, projection='equal_area', save_path=None, show_contours=True, show_clusters=True, show_friction=True):
@@ -364,7 +384,7 @@ class KinematicAnalyzer:
             for offset in [-self.friction, self.friction]:
                 cone_dip = self.slope_dip + offset
                 if 0 <= cone_dip <= 90:
-                    ax.plane(self.slope_dip_dir, cone_dip, color='gray', linestyle=':', linewidth=1,
+                    ax.plane(self.slope_dip_dir, cone_dip, color='red', linestyle='--', linewidth=2,
                              alpha=0.7, label='Friction Cone' if offset == -self.friction else "")
 
         for idx1, idx2, inter_trend, inter_plunge, fs in r['overall']['wedge_potential']:
@@ -379,11 +399,26 @@ class KinematicAnalyzer:
 
         if show_clusters and self.cluster_means:
             for cid, (mean_dir, mean_dip) in self.cluster_means.items():
+                color = cluster_colors[cid] if cluster_colors is not None else 'purple'
+
+                # Plot mean pole (triangle)
                 mean_pole_az = (mean_dir + 180) % 360
                 mean_pole_pl = 90 - mean_dip
-                color = cluster_colors[cid] if cluster_colors is not None else 'purple'
-                ax.pole(mean_pole_az, mean_pole_pl, marker='^',
-                        color=color, markersize=10, label=f'Cluster {cid} Mean')
+                ax.pole(mean_pole_az, mean_pole_pl, marker='^', color=color, markersize=12,
+                        label=f'Cluster {cid} Mean Pole')
+
+                # PLOT THE MEAN PLANE GREAT CIRCLE
+                ax.plane(mean_dir, mean_dip, color=color, linewidth=2.5, linestyle='-', alpha=0.8,
+                         label=f'Cluster {cid} Mean Plane')
+
+                # Optional: Add label on the great circle
+                # (approximate position at dip direction)
+                label_az = math.radians(mean_dir)
+                label_r = 0.75 * (math.pi / 2)  # 75% out on radius
+                if projection == 'equal_area':
+                    label_r = 2 * math.asin(math.sin(label_r / 2))
+                ax.text(label_az, label_r, f'C{cid}', color=color, fontsize=10, fontweight='bold',
+                        ha='center', va='center', transform=ax.transData)
 
         ax.legend(loc='upper right')
         title = f'Stereonet ({projection}, Lower Hem.) | Planar: {r["overall"]["counts"]["planar"]} | Wedge: {r["overall"]["counts"]["wedge"]} | Toppling: {r["overall"]["counts"]["toppling"]}'
@@ -394,4 +429,27 @@ class KinematicAnalyzer:
 
         if save_path:
             fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        return fig
+
+    def plot_scatter(self, x_col, y_col):
+        """Generate a scatter plot for two selected columns."""
+        if self.df is None or x_col not in self.df.columns or y_col not in self.df.columns:
+            raise ValueError("Invalid columns for scatter plot.")
+        fig, ax = plt.subplots(figsize=(10, 6))
+        self.df.plot.scatter(x=x_col, y=y_col, ax=ax, alpha=0.6)
+        ax.set_title(f'Scatter Plot: {x_col} vs {y_col}')
+        ax.set_xlabel(x_col)
+        ax.set_ylabel(y_col)
+        return fig
+
+    def plot_bar(self, col):
+        """Generate a bar chart for a selected column's value counts."""
+        if self.df is None or col not in self.df.columns:
+            raise ValueError("Invalid column for bar chart.")
+        fig, ax = plt.subplots(figsize=(10, 6))
+        self.df[col].value_counts().plot(kind='bar', ax=ax)
+        ax.set_title(f'Bar Chart: {col} Distribution')
+        ax.set_xlabel(col)
+        ax.set_ylabel('Count')
+        plt.xticks(rotation=45)
         return fig
