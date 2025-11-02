@@ -1,0 +1,59 @@
+/* Main window & general background */
+QMainWindow {
+    background-color: #FAF9F6;  /* off-white */
+    color: #222222;             /* darker text */
+}
+
+/* For regular text elements */
+QLabel, QCheckBox {
+    color: #222222;
+    font-size: 14px;
+}
+
+/* Inputs (line edit, combo box, etc) */
+QLineEdit, QSpinBox, QTextEdit, QComboBox {
+    background-color: #FFFFFF;
+    color: #222222;
+    border: 1px solid #C8C8C8;
+}
+
+QLineEdit:focus, QSpinBox:focus, QTextEdit:focus, QComboBox:focus {
+    border: 1px solid #4CAF50;
+    background-color: #FEFEFD;
+}
+
+/* Table view */
+QTableView {
+    background-color: #FFFFFF;
+    alternate-background-color: #F8F8F7;
+    gridline-color: #D0D0D0;
+    color: #222222;
+    selection-background-color: #C8E6C9;
+    selection-color: #1B5E20;
+}
+
+QHeaderView::section {
+    background-color: #EAEAEA;
+    color: #222222;
+    padding: 6px;
+    font-weight: bold;
+}
+
+/* Buttons */
+QPushButton {
+    background-color: #4CAF50;
+    color: white;  /* white text is okay on strong button color */
+    border: none;
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-weight: 500;
+}
+
+QPushButton:hover {
+    background-color: #43A047;
+}
+
+QPushButton:disabled {
+    background-color: #A5D6A7;
+    color: #E8F5E9;
+}

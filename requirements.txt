@@ -1,7 +1,8 @@
-PyQt5
+PySide6
 pandas
 numpy
 matplotlib
 mplstereonet
 scikit-learn
 scipy
+pyinstaller
