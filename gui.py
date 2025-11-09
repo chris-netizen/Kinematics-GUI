@@ -1,3 +1,4 @@
+import traceback
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLineEdit, QLabel, QTableView,
                              QTextEdit, QGraphicsView, QGraphicsScene, QMessageBox,
@@ -557,9 +558,18 @@ class MainWindow(QMainWindow):
             # 4. Update plot
             self.update_plot()
             self.statusBar().showMessage("Analysis complete")
-        except Exception as e:  # MODIFIED: Catch all exceptions
-            QMessageBox.warning(self, "Analysis Error", str(e))
-            self.statusBar().showMessage(f"Analysis Failed: {e}")
+        except Exception as e:
+            # NEW: Create a full, detailed error message
+            error_message = f"An error occurred:\n\n"
+            error_message += f"Type: {type(e).__name__}\n"
+            error_message += f"Error: {str(e)}\n\n"
+            error_message += "Full Traceback:\n"
+            error_message += traceback.format_exc()  # This gets the full stack trace
+
+            # Display it in a message box that can be scrolled
+            QMessageBox.critical(self, "Analysis Error", error_message)
+            self.statusBar().showMessage(
+                f"Analysis Failed: {traceback.format_exc().splitlines()[-1]}")
 
     def update_plot(self):
         """Update plot based on type."""

@@ -10,7 +10,7 @@ from scipy.stats import gaussian_kde
 import matplotlib.cm as cm
 
 import mplstereonet
-from mplstereonet import kinematic_analysis as mpatches
+from mplstereonet import kinematic_analysis
 
 PI = math.pi
 DEG_TO_RAD = PI / 180.0
@@ -436,10 +436,15 @@ class KinematicAnalyzer:
     # NEW AND IMPROVED PLOTTING FUNCTION
     # This is the key to the "Dips-like" plot.
     # =========================================================================
+    # =========================================================================
+    # REFACTORED PLOTTING FUNCTION
+    # This now uses the built-in mplstereonet.kinematic_analysis
+    # functions to draw the correct shaded failure zones.
+    # =========================================================================
     def plot_stereonet(self, projection='equal_area', failure_mode='all_poles', show_contours=True, show_clusters=True):
         """
-        Enhanced plot: Draws shaded kinematic zones just like Dips.
-        Uses mplstereonet's registered projections: 'stereonet' (equal-area) or 'equal_angle'.
+        Enhanced plot: Draws shaded kinematic zones just like Dips
+        using mplstereonet's kinematic_analysis module.
         """
         if not self.results:
             raise ValueError("Run analysis first.")
@@ -447,16 +452,14 @@ class KinematicAnalyzer:
         # Map GUI projection to mplstereonet string
         mpl_proj = 'stereonet' if projection == 'equal_area' else 'equal_angle'
 
-        # Use mplstereonet.subplots() for convenience (creates fig + ax with projection)
+        # Use mplstereonet.subplots() for convenience
         fig, ax = mplstereonet.subplots(projection=mpl_proj, figsize=(10, 10))
-
         ax.grid(True)
 
         r = self.results
         pole_azs, pole_pls = [], []
 
-        # 1. --- Plot All Poles ---
-        # Get colors for clusters
+        # 1. --- Get Cluster Colors ---
         cluster_colors_map = {}
         if show_clusters and r.get('cluster_labels') is not None:
             n_colors = len(
@@ -466,6 +469,7 @@ class KinematicAnalyzer:
                 cluster_colors_map = {
                     i: cluster_colors_list[i % n_colors] for i in range(n_colors)}
 
+        # 2. --- Plot All Poles ---
         default_color = 'blue'
         for i, (idx, row) in enumerate(r['df_processed'].iterrows()):
             pole_az = (row['dip_dir'] + 180) % 360
@@ -478,19 +482,20 @@ class KinematicAnalyzer:
                 label = r['cluster_labels'][i]
                 color = cluster_colors_map.get(label, default_color)
 
+            # Plot poles, but only add one label for the legend
             ax.pole(pole_az, pole_pl, color=color,
-                    marker='o', markersize=4, alpha=0.6)
+                    marker='o', markersize=4, alpha=0.6,
+                    label='Poles' if i == 0 else "")
 
-        # 2. --- Plot Contours ---
+        # 3. --- Plot Contours ---
         if show_contours and len(pole_azs) > 20:
             try:
-                # Use mplstereonet's density contouring
                 ax.density_contour(pole_azs, pole_pls,
                                    cmap='viridis', zorder=0, alpha=0.5)
             except Exception as e:
                 print(f"Contour plotting failed: {e}")  # Non-fatal
 
-        # 3. --- Plot Kinematic Zones & Critical Features ---
+        # 4. --- Plot Kinematic Zones & Critical Features ---
 
         # Always plot the slope plane
         ax.plane(self.slope_dip_dir, self.slope_dip,
@@ -500,85 +505,79 @@ class KinematicAnalyzer:
 
         if failure_mode == 'planar':
             title = 'Planar Sliding Analysis'
-            # Draw friction cone (from center) [cite: 724]
-            ax.cone(0, 0, self.friction, color='gray', linestyle='--',
-                    label=rf'Friction Cone ($\phi$={self.friction:.0f}°)')
-            # Draw lateral limits [cite: 747, 766]
-            ax.axline(self.slope_dip_dir -
-                      self.lateral_limit_planar, 'k:', linewidth=1)
-            ax.axline(self.slope_dip_dir +
-                      self.lateral_limit_planar, 'k:', linewidth=1)
 
-            # TEMP FIX: Custom patch commented; uncomment simple wedge approx for basic shading
-            # from matplotlib.patches import Wedge
-            # lune_wedge = Wedge((0, 0), 1, self.slope_dip_dir - self.lateral_limit_planar,
-            #                    self.slope_dip_dir + self.lateral_limit_planar, width=0.2,
-            #                    color='red', alpha=0.4, transform=ax.transProjection)
-            # ax.add_patch(lune_wedge)
+            # -----------------------------------------------------------------
+            # NEW: Use mplstereonet's built-in function to get failure patches
+            # This draws the daylight envelope, lateral limits, and friction cone zone
+            planar_patches = kinematic_analysis.planar_sliding_patches(
+                self.slope_dip,
+                self.slope_dip_dir,
+                self.friction,
+                self.lateral_limit_planar
+            )
+            for patch in planar_patches:
+                ax.add_patch(patch)
+            # -----------------------------------------------------------------
 
-            # Highlight critical poles
+            # Highlight critical poles (your code for this was good)
+            has_planar_label = False
             for idx, fs in r['overall']['planar_potential']:
                 row = r['df_processed'].loc[idx]
                 ax.pole((row['dip_dir'] + 180) % 360, 90 - row['dip'], 'rs', markersize=8,
-                        label=f'Critical Pole (FS={fs:.2f})' if idx == r['overall']['planar_potential'][0][0] else "")
+                        label='Critical Pole' if not has_planar_label else "")
+                has_planar_label = True
 
         elif failure_mode == 'wedge':
             title = 'Wedge Sliding Analysis'
 
-            # Draw friction cone (from PERIMETER) [cite: 148]
-            ax.cone(0, 0, 90 - self.friction, color='yellow',
-                    linestyle='--', alpha=0.7, label=f'Friction Cone (Perimeter)')
+            # -----------------------------------------------------------------
+            # NEW: Use mplstereonet's built-in function for wedge failure
+            # This draws the friction cone and the critical lune
+            wedge_patches = kinematic_analysis.wedge_sliding_patches(
+                self.slope_dip,
+                self.slope_dip_dir,
+                self.friction
+            )
+            for patch in wedge_patches:
+                ax.add_patch(patch)
+            # -----------------------------------------------------------------
 
-            # TEMP FIX: Use transProjection and sin radius for circle (uncomment for basic shading)
-            # from matplotlib.patches import Circle
-            # from numpy import sin, radians
-            # friction_radius = sin(radians(90 - self.friction))
-            # friction_patch = Circle((0, 0), friction_radius, transform=ax.transProjection,
-            #                         color='yellow', alpha=0.3, zorder=-10)
-            # ax.add_patch(friction_patch)
-
-            # TEMP FIX: GreatCircle approx with full circle mask (uncomment/adjust for basic masking)
-            # mask_patch = Circle((0, 0), 1, transform=ax.transProjection, color='white', alpha=1.0, zorder=-5)
-            # ax.add_patch(mask_patch)
-
-            # Highlight critical intersections [cite: 122]
+            # Highlight critical intersections (your code for this was good)
+            has_wedge_label = False
             for i, (idx1, idx2, trend, plunge, fs) in enumerate(r['overall']['wedge_potential']):
-                ax.line(trend, plunge, 'r-', linewidth=2,
-                        label='Critical Intersection' if i == 0 else "")
+                ax.line(trend, plunge, 'r*', markersize=8,
+                        label='Critical Intersection' if not has_wedge_label else "")
+                has_wedge_label = True
 
         elif failure_mode == 'flexural_toppling':
             title = 'Flexural Toppling Analysis'
 
-            # Draw Slip Limit Plane [cite: 504, 514]
-            slip_limit_dip = max(0, self.slope_dip - self.friction)
-            ax.plane(self.slope_dip_dir, slip_limit_dip, 'r--',
-                     label=f'Slip Limit (Dip={slip_limit_dip:.0f}°)')
+            # -----------------------------------------------------------------
+            # NEW: Use mplstereonet's built-in function for toppling
+            # This draws the slip limit, lateral limits, and critical toppling zone
+            toppling_patches = kinematic_analysis.flexural_toppling_patches(
+                self.slope_dip,
+                self.slope_dip_dir,
+                self.friction,
+                self.lateral_limit_toppling
+            )
+            for patch in toppling_patches:
+                ax.add_patch(patch)
+            # -----------------------------------------------------------------
 
-            # Draw lateral limits (relative to toppling direction) [cite: 524]
-            topple_dir = (self.slope_dip_dir + 180) % 360
-            ax.axline(topple_dir - self.lateral_limit_toppling,
-                      'k:', linewidth=1)
-            ax.axline(topple_dir + self.lateral_limit_toppling,
-                      'k:', linewidth=1)
-
-            # TEMP FIX: Custom patch commented; uncomment simple wedge approx for basic shading
-            # from matplotlib.patches import Wedge
-            # topple_wedge = Wedge((0, 0), 1, topple_dir - self.lateral_limit_toppling,
-            #                      topple_dir + self.lateral_limit_toppling, width=0.3,
-            #                      color='cyan', alpha=0.4, transform=ax.transProjection)
-            # ax.add_patch(topple_wedge)
-
-            # Highlight critical poles
+            # Highlight critical poles (your code for this was good)
+            has_topple_label = False
             for idx, fs in r['overall']['toppling_potential']:
                 row = r['df_processed'].loc[idx]
                 ax.pole((row['dip_dir'] + 180) % 360, 90 - row['dip'], 'cs', markersize=8,
-                        label='Critical Pole' if idx == r['overall']['toppling_potential'][0][0] else "")
+                        label='Critical Pole' if not has_topple_label else "")
+                has_topple_label = True
 
-        # 4. --- Plot Cluster Means ---
-        if show_clusters and self.cluster_means and failure_mode == 'all_poles':  # Only show means on general plot
+        # 5. --- Plot Cluster Means (Only on 'all_poles' view) ---
+        if show_clusters and self.cluster_means and failure_mode == 'all_poles':
             for cid, (mean_dir, mean_dip) in self.cluster_means.items():
                 color = cluster_colors_map.get(cid, 'purple')
-                # FIXED: Removed edgecolor to avoid Line2D compatibility issue
+                # Plot mean pole
                 ax.pole((mean_dir + 180) % 360, 90 - mean_dip, marker='^', color=color, markersize=12,
                         label=f'Cluster {cid} Mean Pole')
                 # Plot mean plane
