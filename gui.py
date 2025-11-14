@@ -38,7 +38,6 @@ class PandasModel(QAbstractTableModel):
     def setData(self, index, value, role=Qt.EditRole):
         if role == Qt.EditRole:
             try:
-                # MODIFIED: More robust type conversion
                 original_dtype = self._data.dtypes[index.column()]
                 if 'float' in str(original_dtype) or 'int' in str(original_dtype):
                     new_val = pd.to_numeric(value)
@@ -200,8 +199,8 @@ class MainWindow(QMainWindow):
         self.n_clusters_spin = QSpinBox()
         self.n_clusters_spin.setRange(1, 10)
         self.n_clusters_spin.setValue(3)
-        self.lat_limit_planar_edit = QLineEdit("20")  # NEW
-        self.lat_limit_topple_edit = QLineEdit("30")  # NEW [cite: 522]
+        self.lat_limit_planar_edit = QLineEdit("20")
+        self.lat_limit_topple_edit = QLineEdit("30")
 
         inputs_layout.addRow(QLabel("--- Slope Parameters ---"), None)
         inputs_layout.addRow(
@@ -233,13 +232,13 @@ class MainWindow(QMainWindow):
         self.results_text = QTextEdit()
         self.results_text.setReadOnly(True)
         self.results_text.setFont(
-            QFont("Courier New", 10))  # NEW: Monospace font
+            QFont("Courier New", 10))
         anal_layout.addWidget(self.results_text)
 
-        self.cluster_stats_text = QTextEdit()  # MODIFIED: Moved from old cluster tab
+        self.cluster_stats_text = QTextEdit()
         self.cluster_stats_text.setReadOnly(True)
         self.cluster_stats_text.setFont(QFont("Courier New", 10))
-        self.cluster_stats_text.setMaximumHeight(150)  # NEW: Set max height
+        self.cluster_stats_text.setMaximumHeight(150)
         anal_layout.addWidget(QLabel("Cluster Stats:"))
         anal_layout.addWidget(self.cluster_stats_text)
 
@@ -251,12 +250,11 @@ class MainWindow(QMainWindow):
         # --- Plot Tab ---
         plot_tab = QWidget()
         plot_layout = QVBoxLayout(plot_tab)
-        self.plot_layout = plot_layout  # For adding canvas
+        self.plot_layout = plot_layout
 
         # Plot control layout
         plot_ctrl_layout = QHBoxLayout()
 
-        # Plot type selection
         plot_type_layout = QFormLayout()
         self.plot_type_combo = QComboBox()
         self.plot_type_combo.addItems(
@@ -265,7 +263,6 @@ class MainWindow(QMainWindow):
             self.on_plot_type_changed)
         plot_type_layout.addRow(QLabel("Plot Type:"), self.plot_type_combo)
 
-        # NEW: Kinematic Mode dropdown
         self.failure_mode_label = QLabel("Kinematic Mode:")
         self.failure_mode_combo = QComboBox()
         self.failure_mode_combo.addItems(
@@ -274,7 +271,6 @@ class MainWindow(QMainWindow):
         plot_type_layout.addRow(self.failure_mode_label,
                                 self.failure_mode_combo)
 
-        # Projection for stereonet
         self.proj_label = QLabel("Projection:")
         self.plot_proj = QComboBox()
         self.plot_proj.addItems(["equal_area", "equal_angle"])
@@ -283,7 +279,6 @@ class MainWindow(QMainWindow):
 
         plot_ctrl_layout.addLayout(plot_type_layout)
 
-        # Stereonet options
         self.stereo_options_layout = QVBoxLayout()
         self.show_contours_cb = QCheckBox("Show Contours")
         self.show_contours_cb.setChecked(True)
@@ -296,14 +291,13 @@ class MainWindow(QMainWindow):
         self.show_clusters_cb.stateChanged.connect(self.update_plot)
         self.stereo_options_layout.addWidget(self.show_clusters_cb)
 
-        # self.show_friction_cb = QCheckBox("Friction Cone") # MODIFIED: Removed, now part of kinematic mode
+        # self.show_friction_cb = QCheckBox("Friction Cone")
         # self.show_friction_cb.setChecked(True)
         # self.show_friction_cb.stateChanged.connect(self.update_plot)
         # self.stereo_options_layout.addWidget(self.show_friction_cb)
         self.stereo_options_layout.addStretch()
         plot_ctrl_layout.addLayout(self.stereo_options_layout)
 
-        # Column selections (for scatter/bar)
         self.col_sel_layout = QFormLayout()
         self.col_x_label = QLabel("X Col:")
         self.x_col_combo = QComboBox()
@@ -319,10 +313,9 @@ class MainWindow(QMainWindow):
         plot_ctrl_layout.addStretch()
         self.plot_layout.addLayout(plot_ctrl_layout)
 
-        # Update/Export buttons
         plot_btn_layout = QHBoxLayout()
         update_plot_btn = QPushButton(
-            "Generate / Update Plot")  # MODIFIED: Clearer name
+            "Generate / Update Plot")
         update_plot_btn.clicked.connect(self.update_plot)
         plot_btn_layout.addWidget(update_plot_btn)
 
@@ -330,14 +323,12 @@ class MainWindow(QMainWindow):
         export_plot_btn.clicked.connect(self.export_plot)
         plot_btn_layout.addWidget(export_plot_btn)
 
-        # MODIFIED: Clearer name
         rose_btn = QPushButton("Generate Rose Diagram (Strikes)")
         rose_btn.clicked.connect(self.plot_rose)
         plot_btn_layout.addWidget(rose_btn)
         plot_btn_layout.addStretch()
         self.plot_layout.addLayout(plot_btn_layout)
 
-        # NEW: Canvas Container
         self.canvas_container = QWidget()
         self.canvas_layout = QVBoxLayout(self.canvas_container)
         self.canvas_container.setSizePolicy(
@@ -364,28 +355,24 @@ class MainWindow(QMainWindow):
             self.y_col_combo.addItems(columns)
             self.bar_col_combo.addItems(columns)
 
-        # Show/hide based on plot type
         is_stereo = (plot_type == "Stereonet")
         is_scatter = (plot_type == "Scatter Plot")
         is_bar = (plot_type == "Bar Chart")
 
-        # Stereonet options
         self.failure_mode_label.setVisible(is_stereo)
         self.failure_mode_combo.setVisible(is_stereo)
         self.proj_label.setVisible(is_stereo)
         self.plot_proj.setVisible(is_stereo)
-        for i in range(self.stereo_options_layout.count()):  # MODIFIED: Loop to show/hide
+        for i in range(self.stereo_options_layout.count()):
             widget = self.stereo_options_layout.itemAt(i).widget()
             if widget:
                 widget.setVisible(is_stereo)
 
-        # Scatter options
         self.col_x_label.setVisible(is_scatter)
         self.x_col_combo.setVisible(is_scatter)
         self.col_y_label.setVisible(is_scatter)
         self.y_col_combo.setVisible(is_scatter)
 
-        # Bar options
         self.col_bar_label.setVisible(is_bar)
         self.bar_col_combo.setVisible(is_bar)
 
@@ -411,7 +398,7 @@ class MainWindow(QMainWindow):
     def toggle_theme(self):
         """Toggle dark/light."""
         current = self.styleSheet()
-        if 'background-color: #f0f0f0' in current:  # Is light, switch to dark
+        if 'background-color: #f0f0f0' in current:
             self.setStyleSheet("""
                 QMainWindow { background-color: #2b2b2b; color: #f0f0f0; }
                 QTabWidget::pane { border-top: 1px solid #444; }
@@ -426,7 +413,7 @@ class MainWindow(QMainWindow):
                 QLabel { font-size: 10pt; color: #f0f0f0; }
                 QFormLayout QLabel { font-weight: bold; }
             """)
-        else:  # Is dark, switch to light
+        else:
             self.apply_styles()
 
     def load_file(self):
@@ -440,7 +427,6 @@ class MainWindow(QMainWindow):
                 self.model.data_changed.connect(self.on_data_changed)
                 self.statusBar().showMessage(
                     f"Loaded {len(self.analyzer.df)} rows.")
-                # Auto-map columns
                 self.map_columns(interactive=False)
             except Exception as e:
                 QMessageBox.warning(
@@ -454,10 +440,9 @@ class MainWindow(QMainWindow):
 
         dialog = ColumnMapperDialog(self.analyzer.df.columns.tolist(), self)
 
-        # Auto-map or show dialog
         if interactive or not (self.analyzer.dip_dir_col in self.analyzer.df.columns and self.analyzer.dip_col in self.analyzer.df.columns):
             if dialog.exec_() != QDialog.Accepted:
-                return  # User cancelled
+                return
 
         dip_dir, dip = dialog.get_selections()
         try:

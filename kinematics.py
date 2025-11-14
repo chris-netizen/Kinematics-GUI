@@ -10,6 +10,7 @@ from scipy.stats import gaussian_kde
 import matplotlib.cm as cm
 
 import mplstereonet
+# Note: If these don't exist, we'll implement below
 from mplstereonet import kinematic_analysis
 
 PI = math.pi
@@ -432,27 +433,16 @@ class KinematicAnalyzer:
             wedge_path = file_path.replace('.csv', '_wedge_failures.csv')
             wedge_df.to_csv(wedge_path, index=False)
 
-    # =========================================================================
-    # NEW AND IMPROVED PLOTTING FUNCTION
-    # This is the key to the "Dips-like" plot.
-    # =========================================================================
-    # =========================================================================
-    # REFACTORED PLOTTING FUNCTION
-    # This now uses the built-in mplstereonet.kinematic_analysis
-    # functions to draw the correct shaded failure zones.
-    # =========================================================================
     def plot_stereonet(self, projection='equal_area', failure_mode='all_poles', show_contours=True, show_clusters=True):
         """
         Enhanced plot: Draws shaded kinematic zones just like Dips
-        using mplstereonet's kinematic_analysis module.
+        using custom implementations from client's recipe.
         """
         if not self.results:
             raise ValueError("Run analysis first.")
 
-        # Map GUI projection to mplstereonet string
         mpl_proj = 'stereonet' if projection == 'equal_area' else 'equal_angle'
 
-        # Use mplstereonet.subplots() for convenience
         fig, ax = mplstereonet.subplots(projection=mpl_proj, figsize=(10, 10))
         ax.grid(True)
 
@@ -495,31 +485,23 @@ class KinematicAnalyzer:
             except Exception as e:
                 print(f"Contour plotting failed: {e}")  # Non-fatal
 
-        # 4. --- Plot Kinematic Zones & Critical Features ---
+        # 4. --- CLIENT'S RECIPE: Friction Circle (Always Shown) ---
+        self.draw_friction_circle(ax, self.friction)
 
-        # Always plot the slope plane
-        ax.plane(self.slope_dip_dir, self.slope_dip,
-                 'g--', linewidth=2, label='Slope Plane')
+        # 5. --- Plot Slope Plane and Pole ---
+        slope_strike = self.strike_from_dipdir(self.slope_dip_dir)
+        ax.plane(slope_strike, self.slope_dip,
+                 'g--', linewidth=2, label='Slope')
+        ax.pole(slope_strike, self.slope_dip, marker='^', ms=7, color='green')
 
         title = f'Stereonet ({projection.replace("_", " ")})'
 
         if failure_mode == 'planar':
             title = 'Planar Sliding Analysis'
-
-            # -----------------------------------------------------------------
-            # NEW: Use mplstereonet's built-in function to get failure patches
-            # This draws the daylight envelope, lateral limits, and friction cone zone
-            planar_patches = kinematic_analysis.planar_sliding_patches(
-                self.slope_dip,
-                self.slope_dip_dir,
-                self.friction,
-                self.lateral_limit_planar
-            )
-            for patch in planar_patches:
-                ax.add_patch(patch)
-            # -----------------------------------------------------------------
-
-            # Highlight critical poles (your code for this was good)
+            # CLIENT'S RECIPE: Shade Planar Envelope
+            self.shade_planar_envelope(
+                ax, self.slope_dip_dir, self.slope_dip, self.friction, self.lateral_limit_planar, alpha=0.18)
+            # Highlight critical poles
             has_planar_label = False
             for idx, fs in r['overall']['planar_potential']:
                 row = r['df_processed'].loc[idx]
@@ -529,20 +511,12 @@ class KinematicAnalyzer:
 
         elif failure_mode == 'wedge':
             title = 'Wedge Sliding Analysis'
-
-            # -----------------------------------------------------------------
-            # NEW: Use mplstereonet's built-in function for wedge failure
-            # This draws the friction cone and the critical lune
-            wedge_patches = kinematic_analysis.wedge_sliding_patches(
-                self.slope_dip,
-                self.slope_dip_dir,
-                self.friction
-            )
-            for patch in wedge_patches:
-                ax.add_patch(patch)
-            # -----------------------------------------------------------------
-
-            # Highlight critical intersections (your code for this was good)
+            # CLIENT'S RECIPE: For wedge, shade a band (simplified envelope) and plot intersections
+            self.shade_wedge_envelope(
+                ax, self.slope_dip_dir, self.slope_dip, self.friction, self.daylight_limit_wedge, alpha=0.15)
+            # Plot all intersections as small dots, critical as stars
+            for idx1, idx2, trend, plunge in r['overall']['all_intersections']:
+                ax.line(trend, plunge, 'k.', markersize=2, alpha=0.3)
             has_wedge_label = False
             for i, (idx1, idx2, trend, plunge, fs) in enumerate(r['overall']['wedge_potential']):
                 ax.line(trend, plunge, 'r*', markersize=8,
@@ -551,21 +525,10 @@ class KinematicAnalyzer:
 
         elif failure_mode == 'flexural_toppling':
             title = 'Flexural Toppling Analysis'
-
-            # -----------------------------------------------------------------
-            # NEW: Use mplstereonet's built-in function for toppling
-            # This draws the slip limit, lateral limits, and critical toppling zone
-            toppling_patches = kinematic_analysis.flexural_toppling_patches(
-                self.slope_dip,
-                self.slope_dip_dir,
-                self.friction,
-                self.lateral_limit_toppling
-            )
-            for patch in toppling_patches:
-                ax.add_patch(patch)
-            # -----------------------------------------------------------------
-
-            # Highlight critical poles (your code for this was good)
+            # CLIENT'S RECIPE: Shade Toppling Envelope
+            self.shade_toppling_envelope(ax, self.slope_dip_dir, self.slope_dip,
+                                         self.lateral_limit_toppling, DEFAULT_TOPPLING_DIP_MIN, alpha=0.12)
+            # Highlight critical poles
             has_topple_label = False
             for idx, fs in r['overall']['toppling_potential']:
                 row = r['df_processed'].loc[idx]
@@ -573,7 +536,7 @@ class KinematicAnalyzer:
                         label='Critical Pole' if not has_topple_label else "")
                 has_topple_label = True
 
-        # 5. --- Plot Cluster Means (Only on 'all_poles' view) ---
+        # 6. --- Plot Cluster Means (Only on 'all_poles' view) ---
         if show_clusters and self.cluster_means and failure_mode == 'all_poles':
             for cid, (mean_dir, mean_dip) in self.cluster_means.items():
                 color = cluster_colors_map.get(cid, 'purple')
@@ -581,7 +544,8 @@ class KinematicAnalyzer:
                 ax.pole((mean_dir + 180) % 360, 90 - mean_dip, marker='^', color=color, markersize=12,
                         label=f'Cluster {cid} Mean Pole')
                 # Plot mean plane
-                ax.plane(mean_dir, mean_dip, color=color, linewidth=2.5, linestyle='-', alpha=0.8,
+                mean_strike = self.strike_from_dipdir(mean_dir)
+                ax.plane(mean_strike, mean_dip, color=color, linewidth=2.5, linestyle='-', alpha=0.8,
                          label=f'Cluster {cid} Mean Plane')
 
         ax.legend(loc='upper left', bbox_to_anchor=(1.05, 1), borderaxespad=0.)
@@ -589,6 +553,72 @@ class KinematicAnalyzer:
         fig.tight_layout()
 
         return fig
+
+    # =========================================================================
+    # CLIENT'S HELPER FUNCTIONS: Integrated Here
+    # These are added as methods to the class for easy access.
+    # =========================================================================
+    def strike_from_dipdir(self, dd):
+        return (dd - 90.0) % 360.0
+
+    def dipdir_from_strike(self, s):
+        return (s + 90.0) % 360.0
+
+    def az_diff(self, a, b):
+        return abs((a - b + 180.0) % 360.0 - 180.0)
+
+    def normal_from_strike_dip(self, strike, dip):
+        s, d = np.deg2rad(strike), np.deg2rad(dip)
+        n = np.array([-np.sin(d)*np.sin(s), np.sin(d)*np.cos(s), np.cos(d)])
+        if n[2] < 0:
+            n = -n
+        return n/np.linalg.norm(n)
+
+    def line_trend_plunge(self, p1, p2):
+        n1 = self.normal_from_strike_dip(*p1)
+        n2 = self.normal_from_strike_dip(*p2)
+        L = np.cross(n1, n2)
+        if np.linalg.norm(L) < 1e-9:
+            return None
+        if L[2] < 0:
+            L = -L
+        plunge = 90.0 - np.degrees(np.arccos(L[2]/np.linalg.norm(L)))
+        trend = (np.degrees(np.arctan2(L[0], L[1])) + 360.0) % 360.0
+        return trend, plunge
+
+    def draw_friction_circle(self, ax, phi_deg):
+        """Draw friction small-circle (constant pole plunge)."""
+        az = np.linspace(0, 360, 361)
+        plunge = np.full_like(az, 90.0 - phi_deg, dtype=float)
+        ax.line(az, plunge, 'k--', lw=1, label='Friction Cone')
+
+    def shade_planar_envelope(self, ax, slope_dd, slope_dip, phi, tol=20, alpha=0.18):
+        """Shade sector for planar sliding in pole space."""
+        a1, a2 = (slope_dd - tol) % 360, (slope_dd + tol) % 360
+        A = np.arange(
+            a1, a2+1) if a1 <= a2 else np.r_[np.arange(a1, 360), np.arange(0, a2+1)]
+        upper, lower = 90 - phi, 90 - slope_dip
+        ax.fill(list(A)+list(A[::-1]), [upper]*len(A)+[lower]*len(A),
+                alpha=alpha, ec='none', color='red', label='Planar Envelope')
+
+    def shade_toppling_envelope(self, ax, slope_dd, slope_dip, tol=20, dip_min=60, alpha=0.12):
+        """Shade band for toppling in pole space."""
+        into = (slope_dd + 180) % 360
+        a1, a2 = (into - tol) % 360, (into + tol) % 360
+        A = np.arange(
+            a1, a2+1) if a1 <= a2 else np.r_[np.arange(a1, 360), np.arange(0, a2+1)]
+        pole_plunge_max = max(0.0, 90 - max(dip_min, 90 - slope_dip))
+        ax.fill(list(A)+list(A[::-1]), [90]*len(A)+[pole_plunge_max]*len(A),
+                alpha=alpha, ec='none', color='cyan', label='Toppling Envelope')
+
+    def shade_wedge_envelope(self, ax, slope_dd, slope_dip, phi, tol=90, alpha=0.15):
+        """Simplified band for wedge in lineation space (azimuthal band)."""
+        a1, a2 = (slope_dd - tol) % 360, (slope_dd + tol) % 360
+        A = np.arange(
+            a1, a2+1) if a1 <= a2 else np.r_[np.arange(a1, 360), np.arange(0, a2+1)]
+        upper, lower = 90 - phi, 90 - slope_dip
+        ax.fill(list(A)+list(A[::-1]), [upper]*len(A)+[lower]*len(A),
+                alpha=alpha, ec='none', color='orange', label='Wedge Envelope')
 
     # ... (plot_scatter and plot_bar remain the same) ...
     def plot_scatter(self, x_col, y_col):
